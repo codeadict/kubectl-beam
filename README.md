@@ -1,6 +1,6 @@
 # kubectl-beam
 
-[![Test](https://github.com/YOUR_USERNAME/kubectl-beam/workflows/Test/badge.svg)](https://github.com/YOUR_USERNAME/kubectl-beam/actions)
+[![CI](https://github.com/codeadict/kubectl-beam/actions/workflows/ci.yml/badge.svg)](https://github.com/codeadict/kubectl-beam/actions)
 
 A kubectl plugin for connecting to BEAM (Erlang VM) nodes running in Kubernetes pods.
 
