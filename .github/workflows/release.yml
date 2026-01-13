@@ -1,0 +1,86 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Get version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Create release archive
+        run: |
+          tar -czf kubectl-beam.tar.gz kubectl-beam LICENSE
+          sha256sum kubectl-beam.tar.gz > kubectl-beam.tar.gz.sha256
+
+      - name: Extract SHA256
+        id: sha256
+        run: |
+          SHA256=$(sha256sum kubectl-beam.tar.gz | awk '{print $1}')
+          echo "SHA256=$SHA256" >> $GITHUB_OUTPUT
+          echo "SHA256: $SHA256"
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            kubectl-beam.tar.gz
+            kubectl-beam.tar.gz.sha256
+          body: |
+            ## kubectl-beam ${{ steps.version.outputs.VERSION }}
+
+            A kubectl plugin for connecting to BEAM (Erlang/Elixir) nodes running in Kubernetes pods.
+
+            ### Installation
+
+            #### Via Krew (Recommended)
+            ```bash
+            kubectl krew install beam
+            ```
+
+            #### Manual Installation
+            ```bash
+            wget https://github.com/codeadict/kubectl-beam/releases/download/${{ steps.version.outputs.VERSION }}/kubectl-beam.tar.gz
+            tar -xzf kubectl-beam.tar.gz
+            sudo mv kubectl-beam /usr/local/bin/
+            sudo chmod +x /usr/local/bin/kubectl-beam
+            ```
+
+            ### Checksums
+
+            **SHA256:** `${{ steps.sha256.outputs.SHA256 }}`
+
+            ### Usage
+
+            ```bash
+            # Connect to a pod using IEx
+            kubectl beam iex my-app-pod
+
+            # Connect to a pod in a specific namespace
+            kubectl beam iex -n production my-app-pod
+
+            # Start Observer GUI
+            kubectl beam iex --observer -n production my-app-pod
+
+            # Use Erlang shell with long names
+            kubectl beam erl -l --cookie secret123 my-app-pod
+            ```
+
+            See the [README](https://github.com/codeadict/kubectl-beam/blob/main/README.md) for full documentation.
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -21,3 +21,6 @@
 
 # Erlang crash dumps
 *.dump
+
+# Krew testing
+.krew*.yaml
