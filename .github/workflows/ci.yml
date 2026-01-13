@@ -1,0 +1,143 @@
+name: Continuous Integration
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+
+      - name: Run shellcheck
+        run: shellcheck kubectl-beam
+
+      - name: Verify POSIX compliance
+        run: shellcheck -s sh kubectl-beam
+
+  unit-test:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install bats
+        run: |
+          git clone --depth 1 https://github.com/bats-core/bats-core.git /tmp/bats
+          sudo /tmp/bats/install.sh /usr/local
+
+      - name: Run unit tests
+        run: bats test/kubectl-beam.bats
+
+  integration-test:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: [lint, unit-test]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read versions from .tool-versions
+        id: versions
+        run: |
+          OTP_VERSION=$(grep erlang .tool-versions | awk '{print $2}')
+          ELIXIR_VERSION=$(grep elixir .tool-versions | awk '{print $2}' | cut -d'-' -f1)
+          echo "otp=$OTP_VERSION" >> $GITHUB_OUTPUT
+          echo "elixir=$ELIXIR_VERSION" >> $GITHUB_OUTPUT
+          echo "OTP Version: $OTP_VERSION"
+          echo "Elixir Version: $ELIXIR_VERSION"
+
+      - name: Setup BEAM
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ steps.versions.outputs.otp }}
+          elixir-version: ${{ steps.versions.outputs.elixir }}
+
+      - name: Verify BEAM installation
+        run: |
+          erl -version
+          elixir --version
+
+      - name: Install bats
+        run: |
+          git clone --depth 1 https://github.com/bats-core/bats-core.git /tmp/bats
+          sudo /tmp/bats/install.sh /usr/local
+
+      - name: Create kind cluster
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: kubectl-beam-test
+          wait: 60s
+
+      - name: Verify cluster
+        run: |
+          kubectl cluster-info
+          kubectl get nodes
+
+      - name: Build Erlang app Docker image
+        run: |
+          cd examples/erlang-app
+          docker build \
+            --build-arg OTP_VERSION=${{ steps.versions.outputs.otp }} \
+            --build-arg ALPINE_VERSION=3.20.3 \
+            -t erlang-app:test .
+
+      - name: Build Elixir app Docker image
+        run: |
+          cd examples/elixir-app
+          docker build \
+            --build-arg ELIXIR_VERSION=${{ steps.versions.outputs.elixir }} \
+            --build-arg OTP_VERSION=${{ steps.versions.outputs.otp }} \
+            --build-arg ALPINE_VERSION=3.20.3 \
+            -t elixir-app:test .
+
+      - name: Load images to kind
+        run: |
+          kind load docker-image erlang-app:test --name kubectl-beam-test
+          kind load docker-image elixir-app:test --name kubectl-beam-test
+
+      - name: Deploy test pods
+        run: |
+          kubectl apply -f examples/k8s/erlang-app-sname.yaml
+          kubectl apply -f examples/k8s/erlang-app-name.yaml
+          kubectl apply -f examples/k8s/elixir-app-sname.yaml
+          kubectl apply -f examples/k8s/elixir-app-name.yaml
+
+      - name: Wait for pods to be ready
+        run: |
+          kubectl wait --for=condition=ready pod/erlang-app-sname --timeout=120s || (kubectl describe pod erlang-app-sname && kubectl logs erlang-app-sname && exit 1)
+          kubectl wait --for=condition=ready pod/erlang-app-name --timeout=120s || (kubectl describe pod erlang-app-name && kubectl logs erlang-app-name && exit 1)
+          kubectl wait --for=condition=ready pod/elixir-app-sname --timeout=120s || (kubectl describe pod elixir-app-sname && kubectl logs elixir-app-sname && exit 1)
+          kubectl wait --for=condition=ready pod/elixir-app-name --timeout=120s || (kubectl describe pod elixir-app-name && kubectl logs elixir-app-name && exit 1)
+
+      - name: Show pod status
+        run: |
+          kubectl get pods
+          kubectl logs erlang-app-sname || true
+          kubectl logs erlang-app-name || true
+          kubectl logs elixir-app-sname || true
+          kubectl logs elixir-app-name || true
+
+      - name: Run integration tests
+        run: bats test/kubectl-beam-integration.bats
+
+      - name: Show pod logs on failure
+        if: failure()
+        run: |
+          echo "=== Erlang app (sname) logs ==="
+          kubectl logs erlang-app-sname || true
+          echo "=== Erlang app (name) logs ==="
+          kubectl logs erlang-app-name || true
+          echo "=== Elixir app (sname) logs ==="
+          kubectl logs elixir-app-sname || true
+          echo "=== Elixir app (name) logs ==="
+          kubectl logs elixir-app-name || true

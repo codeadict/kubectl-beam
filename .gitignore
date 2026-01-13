@@ -1,0 +1,23 @@
+# Temporary files
+*.tmp
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+
+# Test artifacts
+*.scap.gz
+
+# Build artifacts
+/bin/
+/dist/
+
+# Editor files
+.vscode/
+.idea/
+*.iml
+
+# Erlang crash dumps
+*.dump

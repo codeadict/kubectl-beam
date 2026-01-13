@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: erlang-app-sname
+  labels:
+    app: erlang-app
+    variant: sname
+spec:
+  containers:
+  - name: erlang-app
+    image: erlang-app:test
+    imagePullPolicy: Never
+    env:
+    - name: RELX_REPLACE_OS_VARS
+      value: "true"
+    - name: RELEASE_COOKIE
+      value: "test_cookie_secret"
+    - name: NODE_NAME
+      value: "erlang_app"
+    - name: POD_NAME
+      valueFrom:
+        fieldRef:
+          fieldPath: metadata.name
+    - name: POD_IP
+      valueFrom:
+        fieldRef:
+          fieldPath: metadata.name
+    command: ["/app/bin/erlang_app"]
+    args: ["foreground"]

@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: elixir-app-sname
+  labels:
+    app: elixir-app
+    variant: sname
+spec:
+  containers:
+  - name: elixir-app
+    image: elixir-app:test
+    imagePullPolicy: Never
+    env:
+    - name: RELEASE_COOKIE
+      value: "test_cookie_secret"
+    - name: NODE_NAME
+      value: "elixir_app"
+    - name: POD_NAME
+      valueFrom:
+        fieldRef:
+          fieldPath: metadata.name
+    - name: POD_IP
+      valueFrom:
+        fieldRef:
+          fieldPath: metadata.name

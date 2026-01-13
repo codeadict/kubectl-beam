@@ -1,0 +1,11 @@
+{application, erlang_app, [
+    {description, "Minimal Erlang app for kubectl-beam testing"},
+    {vsn, "0.1.0"},
+    {registered, []},
+    {mod, {erlang_app, []}},
+    {applications, [kernel, stdlib, sasl]},
+    {env, []},
+    {modules, []},
+    {licenses, ["Apache-2.0"]},
+    {links, []}
+]}.

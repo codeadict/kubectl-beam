@@ -1,0 +1,22 @@
+## Name of the node (long name)
+-name ${NODE_NAME}@${POD_IP}
+
+## Cookie for distributed erlang
+-setcookie ${RELEASE_COOKIE}
+
+## Heartbeat management
+-heart
+
+## Enable kernel poll and async threads
++K true
++A 30
+
+## Increase number of concurrent ports/sockets
+-env ERL_MAX_PORTS 65536
+
+## Tweak GC to use fullsweep after 0-20 generations
+-env ERL_FULLSWEEP_AFTER 20
+
+## Distribution ports
+-kernel inet_dist_listen_min 9100
+-kernel inet_dist_listen_max 9109
