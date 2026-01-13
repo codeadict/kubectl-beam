@@ -24,6 +24,17 @@ set -eu
 
 VERSION="0.1.0"
 
+# Detect if running as kubectl plugin
+PLUGIN_NAME=$(basename "$0")
+case "$PLUGIN_NAME" in
+    kubectl-*)
+        PLUGIN_MODE=true
+        ;;
+    *)
+        PLUGIN_MODE=false
+        ;;
+esac
+
 # Terminal colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
