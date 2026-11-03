@@ -58,10 +58,10 @@ setup() {
     pid=$!
     sleep 2
 
-    # Check if epmd port is forwarded
+    # Check if the distribution port is forwarded
     if ps -p $pid > /dev/null; then
         # Port forward should be active
-        lsof -i :4369 >/dev/null 2>&1
+        pgrep -f "kubectl port-forward.*erlang-app-sname" >/dev/null 2>&1
         result=$?
         kill $pid 2>/dev/null || true
         [ $result -eq 0 ]

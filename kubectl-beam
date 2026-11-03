@@ -41,10 +41,8 @@ USE_LONG_NAMES=false
 COOKIE=""
 COOKIE_PATH=""
 COOKIE_ENV="RELEASE_COOKIE"
-EPMD_PORT=4369
-DIST_PORT_MIN=9100
-DIST_PORT_MAX=9109
-PORT_FORWARD_PID=""
+DIST_PORT=""
+PORT_FORWARD_PIDS=""
 INET_TMP_DIR=""
 
 # Common cookie paths to try (space-separated)
@@ -59,11 +57,9 @@ log_warn() { printf "${YELLOW}==>${NC} %s\n" "$1"; }
 log_error() { printf "${RED}Error:${NC} %s\n" "$1" >&2; }
 
 cleanup() {
-    if [ -n "${PORT_FORWARD_PID:-}" ] && kill -0 "$PORT_FORWARD_PID" 2>/dev/null; then
-        kill "$PORT_FORWARD_PID" 2>/dev/null || true
-    fi
-    pkill -f "kubectl port-forward.*:$EPMD_PORT" 2>/dev/null || true
-    pkill -f "kubectl port-forward.*:$DIST_PORT_MIN" 2>/dev/null || true
+    for pid in ${PORT_FORWARD_PIDS:-}; do
+        kill "$pid" 2>/dev/null || true
+    done
 
     if [ -n "${INET_TMP_DIR:-}" ] && [ -d "$INET_TMP_DIR" ]; then
         rm -rf "$INET_TMP_DIR"
@@ -312,7 +308,6 @@ get_node_info() {
     # Fallback to detecting from running nodes
     if [ -z "$NODE_NAME" ]; then
         log_info "Detecting node name from EPMD..."
-        # We'll detect this after port-forwarding EPMD
         NODE_NAME=""
     else
         log_success "Node name: $NODE_NAME"
@@ -322,20 +317,12 @@ get_node_info() {
 }
 
 setup_port_forward() {
-    log_info "Setting up port forwarding..."
+    port="$1"
+    log_info "Setting up port forwarding for port $port..."
 
     # Kill any existing port-forwards
-    pkill -f "kubectl port-forward.*:$EPMD_PORT" 2>/dev/null || true
-    pkill -f "kubectl port-forward.*:$DIST_PORT_MIN" 2>/dev/null || true
+    pkill -f "kubectl port-forward.*:$port" 2>/dev/null || true
     sleep 1
-
-    # Build port-forward command
-    ports="$EPMD_PORT:$EPMD_PORT"
-    port=$DIST_PORT_MIN
-    while [ $port -le $DIST_PORT_MAX ]; do
-        ports="$ports $port:$port"
-        port=$((port + 1))
-    done
 
     container_flag=""
     if [ -n "$CONTAINER" ]; then
@@ -344,14 +331,15 @@ setup_port_forward() {
 
     # Start port-forward in background
     # shellcheck disable=SC2086
-    kubectl port-forward -n "$NAMESPACE" $container_flag "$POD_NAME" $ports >/dev/null 2>&1 &
-    PORT_FORWARD_PID=$!
+    kubectl port-forward -n "$NAMESPACE" $container_flag "$POD_NAME" "$port:$port" >/dev/null 2>&1 &
+    pid=$!
+    PORT_FORWARD_PIDS="$PORT_FORWARD_PIDS $pid"
 
     # Wait for port-forward to be ready
     sleep 2
 
-    if ! kill -0 "$PORT_FORWARD_PID" 2>/dev/null; then
-        log_error "Port forwarding failed to start"
+    if ! kill -0 "$pid" 2>/dev/null; then
+        log_error "Port forwarding for port $port failed to start"
         exit 1
     fi
 
@@ -359,35 +347,43 @@ setup_port_forward() {
 }
 
 detect_node_from_epmd() {
-    if [ -n "$NODE_NAME" ]; then
-        return 0
-    fi
+    log_info "Querying EPMD..."
 
-    log_info "Querying EPMD for node names..."
-
-    epmd_output=$(epmd -names 2>/dev/null || true)
+    # kubectl exec runs in the container WORKDIR, assumed to be the release root
+    epmd_output=$(kubectl_exec './erts-*/bin/epmd -names' || true)
 
     if [ -z "$epmd_output" ]; then
         log_error "Could not query EPMD. Is the BEAM node running?"
         exit 1
     fi
 
-    # Parse node names from EPMD output
-    nodes=$(echo "$epmd_output" | tail -n +2 | awk '{print $2}')
+    if [ -z "$NODE_NAME" ]; then
+        nodes=$(echo "$epmd_output" | awk '$1 == "name" {print $2}')
 
-    node_count=$(echo "$nodes" | wc -w | tr -d ' ')
+        node_count=$(echo "$nodes" | wc -w | tr -d ' ')
 
-    if [ "$node_count" -eq 0 ]; then
-        log_error "No BEAM nodes found on pod"
-        exit 1
-    elif [ "$node_count" -eq 1 ]; then
-        NODE_NAME="$nodes"
-        log_success "Detected node: $NODE_NAME"
-    else
-        log_error "Multiple BEAM nodes found: $nodes"
-        log_error "Please specify the node name using NODE_BASENAME environment variable"
+        if [ "$node_count" -eq 0 ]; then
+            log_error "No BEAM nodes found on pod"
+            exit 1
+        elif [ "$node_count" -eq 1 ]; then
+            NODE_NAME="$nodes"
+            log_success "Detected node: $NODE_NAME"
+        else
+            log_error "Multiple BEAM nodes found: $nodes"
+            log_error "Please specify the node name using NODE_BASENAME environment variable"
+            exit 1
+        fi
+    fi
+
+    # Line format: "name <node> at port <port>"
+    DIST_PORT=$(echo "$epmd_output" | awk -v n="$NODE_NAME" '$1 == "name" && $2 == n {print $5}')
+
+    if [ -z "$DIST_PORT" ]; then
+        log_error "Node $NODE_NAME is not registered in EPMD"
         exit 1
     fi
+
+    log_success "Distribution port: $DIST_PORT"
 }
 
 setup_inet_config() {
@@ -424,6 +420,9 @@ connect_beam() {
     remote_node="${NODE_NAME}@${node_host}"
     local_node="kubectl_beam_$$@${node_host}"
 
+    # No local EPMD: assume the remote listens on DIST_PORT and don't listen ourselves
+    dist_flags="-dist_listen false -erl_epmd_port $DIST_PORT -start_epmd false"
+
     log_success "Connecting to $remote_node"
     echo ""
 
@@ -435,11 +434,13 @@ connect_beam() {
             iex --"$name_flag" "$local_node" \
                 --cookie "$COOKIE" \
                 --hidden \
+                --erl "$dist_flags" \
                 -e "Node.connect(:\"$remote_node\"); :observer.start()"
         else
+            # shellcheck disable=SC2086
             erl -"$name_flag" "$local_node" \
                 -setcookie "$COOKIE" \
-                -hidden \
+                -hidden $dist_flags \
                 -eval "net_kernel:connect_node('$remote_node'), observer:start()."
         fi
     else
@@ -450,11 +451,13 @@ connect_beam() {
             iex --"$name_flag" "$local_node" \
                 --cookie "$COOKIE" \
                 --hidden \
+                --erl "$dist_flags" \
                 --remsh "$remote_node"
         else
+            # shellcheck disable=SC2086
             erl -"$name_flag" "$local_node" \
                 -setcookie "$COOKIE" \
-                -hidden \
+                -hidden $dist_flags \
                 -remsh "$remote_node"
         fi
     fi
@@ -465,8 +468,8 @@ main() {
     check_dependencies
     get_cookie
     get_node_info
-    setup_port_forward
     detect_node_from_epmd
+    setup_port_forward "$DIST_PORT"
     setup_inet_config
     connect_beam
 }

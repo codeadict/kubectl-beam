@@ -97,7 +97,7 @@ kubectl beam iex -c app-container my-app-pod
 
 The plugin establishes a connection to remote BEAM nodes by:
 
-1. Port-forwarding EPMD (port 4369) and Erlang distribution ports (9100-9109) from the pod to localhost
+1. Querying EPMD inside the pod for the node's distribution port and port-forwarding only that port to localhost
 2. Automatically detecting or accepting a specified Erlang cookie
 3. Configuring local DNS resolution to map the pod IP to localhost
 4. Starting a local hidden BEAM node that connects to the remote node via `--remsh`
@@ -152,7 +152,7 @@ kubectl beam iex --cookie-path /custom/path/to/.erlang.cookie my-app-pod
 
 ### Port forwarding fails
 
-Ensure no other processes are using ports 4369 or 9100-9109 on your local machine.
+Ensure no other process is using the node's distribution port on your local machine. The local port must match the pod's port, because the local node connects to the port the remote node registered in EPMD.
 
 ### Multiple nodes detected
 
