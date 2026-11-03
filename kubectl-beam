@@ -435,13 +435,13 @@ connect_beam() {
                 --cookie "$COOKIE" \
                 --hidden \
                 --erl "$dist_flags" \
-                -e "Node.connect(:\"$remote_node\"); :observer.start()"
+                -e ":observer.start(:\"$remote_node\")"
         else
             # shellcheck disable=SC2086
             erl -"$name_flag" "$local_node" \
                 -setcookie "$COOKIE" \
                 -hidden $dist_flags \
-                -eval "net_kernel:connect_node('$remote_node'), observer:start()."
+                -eval "observer:start('$remote_node')."
         fi
     else
         log_warn "Connected. Press Ctrl+C twice to exit."
