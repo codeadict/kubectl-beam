@@ -48,7 +48,6 @@ make test-integration
 
 **Cookie**: `test_cookie_secret` (set via `RELEASE_COOKIE` env var)
 **EPMD**: Port 4369
-**Distribution**: Ports 9100-9109
 
 **Note**: Example apps use `POD_IP` environment variable for the node host part. Since IP addresses contain dots (e.g., `10.244.0.5`), they are treated as long names by Erlang. The `-sname` examples would not work in practice with IP addresses - they're included for testing the kubectl-beam tool only.
 
